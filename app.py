@@ -3,10 +3,22 @@ import base64
 import json
 from flask import Flask, request, jsonify, render_template
 from openai import OpenAI
+from dotenv import load_dotenv
+
 
 # --- 1. CONFIGURATION ---
 # Ensure your API key is set in your environment variables
 # os.environ["OPENAI_API_KEY"] = "sk-..." 
+
+from_code = "en"
+to_code = "es"
+
+load_dotenv()
+
+client = OpenAI(
+    api_key=os.getenv("OPENAI_API_KEY"),
+)
+
 
 client = OpenAI()
 
@@ -120,8 +132,9 @@ def analyze_pcb():
             ],
             response_format=SCHEMA, # Enforces the strict JSON schema
             temperature=0.1,
-            max_tokens=4096
+            max_completion_tokens=4096
         )
+        print("Actual model used:", response.model)
 
         # Parse the Structured Output
         result_content = response.choices[0].message.content

@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ACI Phase 1: Detection Test</title>
+    <style>
+        body { font-family: sans-serif; max-width: 1200px; margin: 0 auto; padding: 20px; }
+        .container { display: flex; gap: 20px; }
+        .image-container { position: relative; border: 2px solid #ccc; }
+        #pcbCanvas { max-width: 100%; height: auto; }
+        .controls { margin-bottom: 20px; padding: 15px; background: #f5f5f5; border-radius: 8px; }
+        pre { background: #eee; padding: 10px; overflow-x: auto; max-height: 400px; }
+        
+        /* Bounding Box Colors */
+        .box-ic { border-color: #ff0000; color: #ff0000; } /* Red */
+        .box-cap { border-color: #00ff00; color: #00ff00; } /* Green */
+        .box-conn { border-color: #0000ff; color: #0000ff; } /* Blue */
+    </style>
+</head>
+<body>
+
+    <h1>🤖 ACI Phase 1: Detection & Localization</h1>
+    
+    <div class="controls">
+        <input type="file" id="imageInput" accept="image/*">
+        <button onclick="analyzeImage()">Analyze PCB</button>
+        <span id="status">Ready</span>
+    </div>
+
+    <div class="container">
+        <div class="image-container" id="imgContainer">
+            <canvas id="pcbCanvas"></canvas>
+        </div>
+
+        <div style="flex: 1;">
+            <h3>Detections Summary</h3>
+            <div id="summary"></div>
+            <h3>Raw Response</h3>
+            <pre id="jsonOutput"></pre>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('pcbCanvas');
+        const ctx = canvas.getContext('2d');
+        let currentImage = new Image();
+
+        // 1. Load Image onto Canvas
+        document.getElementById('imageInput').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                currentImage.onload = function() {
+                    canvas.width = currentImage.width;
+                    canvas.height = currentImage.height;
+                    ctx.drawImage(currentImage, 0, 0);
+                }
+                currentImage.src = event.target.result;
+            }
+            reader.readAsDataURL(file);
+        });
+
+        // 2. Send to Backend
+        async function analyzeImage() {
+            const fileInput = document.getElementById('imageInput');
+            if (!fileInput.files[0]) return alert("Please select an image first");
+
+            document.getElementById('status').innerText = "Analyzing (Waiting for GPU)...";
+            
+            // Convert to Base64
+            const reader = new FileReader();
+            reader.readAsDataURL(fileInput.files[0]);
+            reader.onloadend = async function() {
+                const base64data = reader.result.split(',')[1];
+                const mimeType = reader.result.split(';')[0].split(':')[1];
+
+                try {
+                    const response = await fetch('/analyze_pcb', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ image: base64data, mime_type: mimeType })
+                    });
+                    
+                    const data = await response.json();
+                    document.getElementById('status').innerText = "Analysis Complete";
+                    
+                    // Display Data
+                    document.getElementById('jsonOutput').innerText = JSON.stringify(data, null, 2);
+                    displaySummary(data.summary);
+                    
+                    // Draw Boxes
+                    drawBoxes(data.detections);
+
+                } catch (error) {
+                    console.error(error);
+                    document.getElementById('status').innerText = "Error: " + error;
+                }
+            }
+        }
+
+        // 3. Visualization Logic
+        function drawBoxes(detections) {
+            // Redraw image to clear old boxes
+            ctx.drawImage(currentImage, 0, 0);
+            
+            detections.forEach(item => {
+                const [ymin, xmin, ymax, xmax] = item.box_2d;
+                
+                // Convert normalized coords (0-1) to pixel coords
+                const x = xmin * canvas.width;
+                const y = ymin * canvas.height;
+                const w = (xmax - xmin) * canvas.width;
+                const h = (ymax - ymin) * canvas.height;
+
+                // Color Coding
+                ctx.lineWidth = 3;
+                if (item.category.includes("Integrated Circuits")) ctx.strokeStyle = "red";
+                else if (item.category.includes("Capacitor")) ctx.strokeStyle = "green";
+                else ctx.strokeStyle = "blue";
+
+                ctx.strokeRect(x, y, w, h);
+                
+                // Draw Label
+                ctx.fillStyle = ctx.strokeStyle;
+                ctx.font = "bold 16px Arial";
+                const label = item.part_number !== "null" ? item.part_number : item.category;
+                ctx.fillText(label, x, y - 5);
+            });
+        }
+
+        function displaySummary(summary) {
+            const div = document.getElementById('summary');
+            let html = "<ul>";
+            for (const [key, val] of Object.entries(summary)) {
+                html += `<li><b>${key}:</b> ${val}</li>`;
+            }
+            html += "</ul>";
+            div.innerHTML = html;
+        }
+    </script>
+</body>
+</html>
